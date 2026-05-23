@@ -173,6 +173,26 @@
   }
   .help-btn:hover { border-color: var(--border-strong); color: var(--text); }
 
+  .copy-names-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .copy-names-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+  .copy-names-btn.copied {
+    border-color: var(--emerald);
+    color: var(--emerald);
+    background: var(--emerald-bg);
+  }
+
   /* Format help */
   .format-help {
     background: var(--surface-alt);
@@ -1002,7 +1022,7 @@
       <div class="logo">℞</div>
       <div>
         <h1>다보스병원 처방약 매칭 도우미</h1>
-        <div class="subtitle">by 심장내과 · 2026.5.14 업데이트</div>
+        <div class="subtitle">by 심장내과 · 2026.5.23 업데이트</div>
       </div>
     </div>
     <div class="meta-row">
@@ -1110,6 +1130,7 @@
     <div class="section-header">
       <span class="step">2</span>
       <h2>매칭 결과</h2>
+      <button type="button" class="copy-names-btn" id="copyNamesBtn" title="매칭된 본원 약품명을 한 줄씩 클립보드에 복사">📋 본원 약품명 복사</button>
     </div>
     <div class="stats" id="stats"></div>
     <div id="results"></div>
@@ -1140,7 +1161,7 @@
     <p>대체약 매칭은 동일 성분·함량 기준이며, 제형(정/캡슐/시럽), 서방형 여부, 부형제 등은 별도 확인이 필요합니다.</p>
     <p class="data-source">한글약명 자동 식별 데이터: 건강보험심사평가원 약제급여목록표 (<strong>2026-05-01 기준</strong>)</p>
     <p class="version-info">
-      다보스병원 처방약 매칭 도우미 <strong>v19</strong> · 2026.5.14
+      다보스병원 처방약 매칭 도우미 <strong>v20</strong> · 2026.5.23
       <span class="visitor-count" id="visitorCount" hidden>
         · 오늘 <strong id="visitorToday">-</strong> · 누적 <strong id="visitorTotal">-</strong>
       </span>
@@ -1970,6 +1991,8 @@ function runSearch(query) {
 // =====================================================
 // 이벤트 핸들러
 // =====================================================
+let lastMatchResults = [];
+
 document.getElementById('matchBtn').addEventListener('click', () => {
   const text = document.getElementById('input').value;
   const lines = text.split('\n')
@@ -1982,6 +2005,7 @@ document.getElementById('matchBtn').addEventListener('click', () => {
   }
 
   const results = lines.map(matchOne);
+  lastMatchResults = results;
   renderResults(results);
 });
 
@@ -1990,6 +2014,78 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   document.getElementById('resultsCard').hidden = true;
   document.getElementById('input').focus();
 });
+
+// 매칭된 본원 약품명을 한 줄씩 클립보드에 복사 (EMR 입력용)
+function copyMatchedNames() {
+  const btn = document.getElementById('copyNamesBtn');
+  if (!lastMatchResults || lastMatchResults.length === 0) return;
+
+  // 매칭된 결과에서 첫 번째(우선순위 최상위) 본원 약품명만 추출
+  // 처방 불가(none)는 본원 약품이 없으므로 제외
+  const names = [];
+  let skipped = 0;
+  for (const r of lastMatchResults) {
+    if (r.matches && r.matches.length > 0 && r.matches[0].d) {
+      names.push(r.matches[0].d);
+    } else {
+      skipped++;
+    }
+  }
+
+  if (names.length === 0) {
+    setCopyFeedback(btn, '복사할 본원 약품 없음', false);
+    return;
+  }
+
+  const text = names.join('\n');
+
+  // 클립보드 복사 (navigator.clipboard 우선, 실패 시 textarea fallback)
+  const onDone = () => {
+    const msg = skipped > 0
+      ? `✓ ${names.length}개 복사됨 (불가 ${skipped}개 제외)`
+      : `✓ ${names.length}개 복사됨`;
+    setCopyFeedback(btn, msg, true);
+  };
+  const onFail = () => setCopyFeedback(btn, '복사 실패 — 직접 선택해 주세요', false);
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onDone).catch(() => {
+      legacyCopy(text) ? onDone() : onFail();
+    });
+  } else {
+    legacyCopy(text) ? onDone() : onFail();
+  }
+}
+
+// 구형 브라우저·비보안 컨텍스트용 fallback 복사
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function setCopyFeedback(btn, msg, success) {
+  if (!btn) return;
+  const original = '📋 본원 약품명 복사';
+  btn.textContent = msg;
+  if (success) btn.classList.add('copied');
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove('copied');
+  }, 2200);
+}
+
+document.getElementById('copyNamesBtn').addEventListener('click', copyMatchedNames);
 
 document.getElementById('sampleBtn').addEventListener('click', () => {
   document.getElementById('input').value = `노바스크정 5mg | amlodipine | 5mg
@@ -2174,6 +2270,13 @@ window.addEventListener('paste', (e) => {
 // 변경 내역 카드 (페이지 하단)
 // =====================================================
 const CHANGELOG = [
+  {
+    version: 'v20',
+    date: '2026.5.23',
+    changes: [
+      '매칭 결과 복사 기능 추가 — [본원 약품명 복사] 버튼으로 매칭된 본원 약품명을 한 줄씩 클립보드에 복사 (EMR 입력용)',
+    ],
+  },
   {
     version: 'v19',
     date: '2026.5.14',
